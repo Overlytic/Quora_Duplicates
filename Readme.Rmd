@@ -1,0 +1,67 @@
+---
+title: "Readme"
+author: "Tinus Cloete"
+date: "31 March 2017"
+output: html_document
+---
+
+# Quora Duplicate Questions
+
+## Overview
+
+This is a competition on Kaggle where the aim is to identify duplicate questions within in a Quora dataset of questions. 
+This is done in order to make it easier to find the correct answers for a given question on the internet.
+
+## Data
+
+Lets start off by loading the data into a dataframe
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(tidytext)
+```
+
+```{r}
+train <- read_csv("Data/train.csv")
+
+head(train)
+```
+
+So the structure of the data is the following:
+
+Column | Description
+------ | ----------------------------------------------------------------
+id:    | the id of a training set question pair
+qid1:  | unique id of question 1 (only available in train.csv)
+qid2:  | unique id of question 2 (only available in train.csv)
+question1: | the full text of question 1
+question2: | the full text of question 2
+is_duplicate: | the target variable, 1 if question1 and question2 have essentially the same meaning, and 0 otherwise.
+
+Let see what the distribution is over the different numerical columns:
+
+```{r}
+
+summary(train)
+
+```
+
+So overall about 37% of the questions in the training data were identified as duplicates. That is actually quite high!
+The credibility is also decent with over 404 000 question pairs.
+
+The next step is the cleaning of the text in the questions.
+
+```{r}
+
+questions <- train %>% 
+             select(id, qid=qid1, question=question1) %>% 
+             bind_rows(train %>% select(id, qid=qid2, question=question2)) %>% 
+             arrange(id, qid)
+
+tidy_questions <- questions %>% 
+                  unnest_tokens(word, question)
+
+tidy_questions %>% filter(id == 0)
+
+```
+
