@@ -54,15 +54,206 @@ The next step is the cleaning of the text in the questions.
 ```{r}
 
 questions <- train %>% 
-             select(id, qid=qid1, question=question1) %>% 
-             bind_rows(train %>% select(id, qid=qid2, question=question2)) %>% 
-             arrange(id, qid)
+             select(qid=qid1, question=question1) %>% 
+             bind_rows(train %>% select(qid=qid2, question=question2)) %>% 
+             group_by(qid) %>% 
+             filter(row_number(qid) == 1) %>% 
+             ungroup() %>% 
+             arrange(qid)
 
-tidy_questions <- questions %>% 
-                  unnest_tokens(word, question)
-
-tidy_questions %>% filter(id == 0)
+#Check that only one version of the weightloss question
+questions %>% filter(qid == 2559)
 
 ```
 
+
+## Tidy Dataset
+
+```{r}
+tidy_raw_questions <- questions %>% 
+                      ungroup() %>% 
+                      unnest_tokens(word, question)
+
+```
+
+ So conceptually I can see how we classify questions into different categories or types. A lot of this will be driven by single words or pairs (even groups) of words.
+ 
+Let us start with a simple count of the words (before removing any stopwords)
+
+```{r}
+
+tidy_raw_questions %>% count(word,sort = TRUE)
+```
+
+```{r}
+
+tidy_raw_questions %>% 
+  count(word) %>% 
+  with(wordcloud(word, n, max.words = 100))
+
+```
+
+A combination between the two would be better. Let's start with the tidy_questions and then remove a few of the main words that don't add any information.
+
+```{r}
+library(tibble)
+
+own_stopwords <-  tibble(word = c("the", "is", "to", "a", "an", "of"))
+
+tidy_words    <- tidy_raw_questions %>% 
+                  anti_join(own_stopwords, by="word")
+
+tidy_words %>% 
+  count(word) %>% 
+  with(wordcloud(word,n,max.words=100))
+                  
+                   
+```
+
+This doesn't seem to be working. Let's rather then just use the content words for now.
+
+Most of the high-ranking words are stopwords. Let's remove all of them for now.
+
+```{r}
+tidy_key_words <- tidy_raw_questions %>% 
+                  anti_join(stop_words, by = "word")
+
+tidy_key_words %>% count(word, sort = TRUE) %>% head(10)
+
+```
+
+this leaves only the key words. However important question words are removed like "how" vs "why"
+
+Just for the heck of it. Let's look at this as a word cloud
+
+```{r}
+library(wordcloud)
+library(RColorBrewer)
+
+tidy_key_words %>% 
+  count(word) %>% 
+  with(wordcloud(word, n, max.words = 100))
+              
+                
+```
+
+## Decision Tree
+
+So lets start with a basic decision tree. I am going to make the first one very simple, as this is just an example of how a decision tree works.Lets use the top 5 words as categorical variables.
+
+```{r}
+top_5_words <- tidy_key_words %>% count(word, sort=TRUE) %>% top_n(5, n) %>% .$word
+
+top_5_words
+
+```
+
+Next the tidy_key_words need to be filtered for only those 5 words.
+
+```{r}
+
+tree_word_matrix <- tidy_key_words %>% 
+                    filter(word %in% top_5_words) %>% 
+                    cast_sparse(qid, word)
+
+tree_word_matrix[1:10,]
+
+```
+
+I actually just want to see if this really worked. Lets have a look at those first 5 questions
+
+First to get the qid numbers
+```{r}
+
+check_qid <- rownames(tree_word_matrix[1:10,]) %>% as.integer()
+
+check_qid
+
+```
+
+
+```{r}
+
+train %>% 
+  filter(qid1 %in% check_qid) %>%
+  mutate()
+  bind_rows(train %>% filter(qid2 %in% check_qid)) %>% 
+  count(qid1, question1)
+          
+```
+
+This highlights a few things for me.... firstly TIDY FLIPPEN DATA. The fact that my data is not tidy is becoming very apparent and a pain in the butt.
+
+
+So what is the most common question in the dataset?
+
+```{r}
+questions %>% count(qid, question, sort = TRUE) %>%  head(5)
+```
+
+## Looking only at Weight Loss Questions
+
+I am going to focus on a concrete example here... let's see if we can get the jist of the dataset from questions about losing weight.
+
+```{r}
+
+# train %>% filter(qid1 == 2559 | qid2 == 2559, is_duplicate == 1) %>% View()
+# train %>% filter(qid1 == 2559 | qid2 == 2559, is_duplicate == 0) %>% View()
+
+```
+
+These are the 5 key examples I chose that show the different cases that will generally occur.
+
+```{r}
+
+weight_examples_qid2 <- c(2711,41484,396785,380073,118125)
+
+train %>% 
+  filter(qid1 == 2559, qid2 %in% weight_examples_qid2) %>% 
+  select(question1, question2, is_duplicate)
+
+```
+
+Another really important thing I noticed is that there is a bias in the dataset. Mainly weight related questions are being compared. It is almost as if the data has already been grouped and mainly questions within the same categories are being compared.
+
+There is also an extremely high percentage of the weight loss questions that are seen as duplicate questions.
+
+Also if both words are used in both questions e.g. "lose" "weight"... or derivatives thereof. Then there is an even higher likelihood that the questions will be seen as duplicate.
+
+Let's illustrate these facts with actual statistics:
+
+```{r}
+
+weight_loss <- filter(train, qid1 == 2559 | qid2 == 2559)
+
+weight_loss %>% count(is_duplicate) %>%  mutate(prop = n / sum(n))
+
+```
+
+Okay so I was wrong about more of the questions being duplicates. Only ~25% of these were successes.
+
+How about the word usage? First lets see what are the most common words used in the weight loss example
+
+```{r}
+weight_loss_qids <- c(weight_loss$qid1, weight_loss$qid2) %>% unique()
+
+weight_loss_words <- filter(tidy_questions, qid %in% weight_loss_qids)
+weight_loss_key_words <- filter(tidy_key_words, qid %in% weight_loss_qids)
+```
+
+```{r}
+weight_loss_words %>% 
+  count(word) %>% 
+  with(wordcloud(word, n, max.words = 100))
+```
+
+```{r}
+weight_loss_key_words %>% 
+  count(word) %>% 
+  with(wordcloud(word, n, max.words = 100))
+```
+
+```{r}
+
+```
 
