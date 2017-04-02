@@ -253,7 +253,131 @@ weight_loss_key_words %>%
   with(wordcloud(word, n, max.words = 100))
 ```
 
+Lets get the top 5 words
+
 ```{r}
+
+top_weight_words <- weight_loss_key_words %>% 
+                    count(word, sort = TRUE) %>% 
+                    top_n(5, n) %>% 
+                    .$word
+
+top_weight_words
 
 ```
 
+```{r}
+top_weight_loss_key_words <- weight_loss_key_words %>% 
+                             filter(word %in% top_weight_words)
+
+head(top_weight_loss_key_words)
+````
+
+
+```{r}
+
+library(Matrix)
+library(Matrix.utils)
+
+wl_word_matrix <- cast_sparse(top_weight_loss_key_words, qid, word)
+
+#convert the row names to a column
+
+names <- row.names(wl_word_matrix) %>% as.integer() 
+mat_names <- Matrix(names, length(names), 1, sparse = TRUE)
+colnames(mat_names) <- c("qid")
+
+wl_word_matrix <- cBind(mat_names,wl_word_matrix)
+rownames(wl_word_matrix) <- NULL
+
+# display first 5 entries
+
+wl_word_matrix[1:5,]
+
+```
+
+just to check
+
+```{r}
+
+check_5 <- wl_word_matrix %>% 
+           row.names() %>% 
+           as.integer() %>% 
+           .[1:5]
+
+questions %>% filter(qid %in% (check_5))
+
+# questions %>% filter(qid %in% c(17100,53632,86826,90445,120758))
+
+```
+
+Lets first figure out how to merge two sparse matrices. I don't want to convert to dataframes since this would increase the ram used significantly and won't be scalible to more words etc.
+
+```{r}
+
+# lets just check if this actually works with two normal sparse matrices
+
+m1 <- Matrix(c(0,0,0,1,2,3,4,5,6), 3,3, sparse=TRUE, dimnames = list(NULL,c("c1","c2","c3")))
+m2 <- Matrix(c(1,3,9,9), 2,2, sparse=TRUE, dimnames = list(NULL,c("c2","c4")))
+
+m1
+m2
+
+# merge.Matrix(m1,m2,by="c2",all.x=TRUE,all.y=FALSE) # does not work
+
+m3 <- merge.Matrix(m1, m2, by.x = m1[,2], by.y=m2[,1], all.x=TRUE, all.y=FALSE)
+
+m3
+
+```
+
+Okay this works then... lets try it on the weight loss data.
+
+```{r}
+
+wl_train_matrix <- weight_loss %>% 
+                   select(id, qid1, qid2, is_duplicate) %>% 
+                   as.matrix() %>% 
+                   as("sparseMatrix")
+
+wl_train_matrix2 <- merge.Matrix(wl_train_matrix, wl_word_matrix, 
+                                 by.x=wl_train_matrix[,2], by.y=wl_word_matrix[,1], #qid1 is col 2, qid is col 1
+                                 all.x = TRUE, all.y = FALSE)
+
+```
+
+It works... but Sparse matrices are making my life too difficult. Especially the printing. 
+
+Back to the hadleyverse (okay fine the tidyverse)
+
+```{r}
+
+wl_train <- weight_loss %>% 
+            select(id, qid1, qid2, is_duplicate)
+
+wl_word_occurrence <- wl_word_matrix %>% 
+                     as.matrix() %>% 
+                     as_data_frame()
+
+wl_train2 <- wl_train %>% 
+             left_join(wl_word_occurrence, c("qid1" = "qid")) %>% 
+             left_join(wl_word_occurrence, c("qid2" = "qid"), suffix = c(".q1",".q2"))
+
+
+head(wl_train2)
+
+```
+
+There are some NA values
+
+```{r}
+
+library(stringr)
+
+  wl_train2 %>% 
+    filter(is.na(fat.q1)) %>% 
+    select(qid1) %>%
+    left_join(questions, c("qid1" = "qid")) %>% 
+    mutate(question = str_trunc(question, 80))
+
+```
